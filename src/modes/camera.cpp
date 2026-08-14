@@ -2,7 +2,7 @@
 //  HeathenHawk Talon5 — modes/camera.cpp
 //  SC2356 2MP camera — pending M5Unified P4 camera support
 // ============================================================
-#include "../pins.h"
+#include "../../pins.h"
 #include "../display/display_driver.h"
 #include "../hawk/hawk_pet.h"
 #include <Arduino.h>

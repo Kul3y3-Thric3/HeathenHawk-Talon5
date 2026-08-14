@@ -6,7 +6,7 @@
 
 #include "hawk_pet.h"
 #include "../display/display_driver.h"
-#include "../pins.h"
+#include "../../pins.h"
 #include <Preferences.h>
 #include <M5Unified.h>
 

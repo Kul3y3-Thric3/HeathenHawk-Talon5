@@ -1,16 +1,16 @@
 // ============================================================
 //  HeathenHawk Talon5 — display/display_driver.h
 //  M5GFX display abstraction for Tab5 5" 1280x720 touchscreen
-//  Supports portrait (tablet) and landscape (cyberdeck) modes
-//  Touch input handled here alongside display output
+//  Touch via M5.Lcd.getTouchRaw() — works on all Tab5 revisions
+//  including GT911, ST7123, and ST7121
 // ============================================================
 
 #pragma once
 #include <Arduino.h>
 #include <M5Unified.h>
-#include "../pins.h"
+#include "../../pins.h"
 
-// ── Color palette (RGB888 for M5GFX) ─────────────────────────────────────────
+// ── Color palette (RGB888) ────────────────────────────────────────────────────
 #define HH_DARK      0x0A0A12
 #define HH_WHITE     0xFFFFFF
 #define HH_GRAY      0x666677
@@ -36,21 +36,19 @@ struct TouchEvent {
     bool    held;
 };
 
-// ── Orientation mode ──────────────────────────────────────────────────────────
+// ── Orientation ───────────────────────────────────────────────────────────────
 enum Orientation {
-    ORI_PORTRAIT  = 0,   // Tablet mode — 720 wide x 1280 tall
-    ORI_LANDSCAPE = 1,   // Cyberdeck mode — 1280 wide x 720 tall
+    ORI_PORTRAIT  = 0,
+    ORI_LANDSCAPE = 1,
 };
 
 namespace Display {
-    // Init
     void         begin();
     void         setOrientation(Orientation ori);
     Orientation  getOrientation();
     int32_t      width();
     int32_t      height();
 
-    // Drawing primitives
     void         clear(uint32_t color = HH_DARK);
     void         fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color);
     void         drawRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color);
@@ -62,7 +60,6 @@ namespace Display {
     void         fillCircle(int32_t x, int32_t y, int32_t r, uint32_t color);
     void         drawCircle(int32_t x, int32_t y, int32_t r, uint32_t color);
 
-    // Text
     void         setTextColor(uint32_t fg, uint32_t bg = HH_DARK);
     void         setTextSize(float s);
     void         setCursor(int32_t x, int32_t y);
@@ -72,12 +69,11 @@ namespace Display {
     int32_t      textWidth(const char* str);
     int32_t      textHeight();
 
-    // Touch
+    // Touch — uses M5.Lcd.getTouchRaw() for all Tab5 hardware revisions
     TouchEvent   getTouch();
     bool         isTouched();
     void         waitForTap();
 
-    // HH UI components
     void         drawStatusBar(const char* mode, bool gps, bool sd,
                                bool c5, uint8_t battery);
     void         drawCard(int32_t x, int32_t y, int32_t w, int32_t h,
@@ -93,21 +89,13 @@ namespace Display {
     void         showAlert(const char* title, const char* msg,
                            uint32_t color, uint32_t ms);
     void         showToast(const char* msg, uint32_t color = HH_PURPLE);
-
-    // Boot sequence
     void         playBootAnimation();
     void         showSplash(const char* version);
-
-    // Menu
     void         drawTabletMenu(const char** labels, const uint32_t* colors,
                                 uint8_t count, uint8_t selected);
     void         drawCyberdeckMenu(const char** labels, const uint32_t* colors,
                                    uint8_t count, uint8_t selected);
-
-    // GPS panel
     void         drawGPSPanel(double lat, double lon, float speed,
                               uint8_t sats, bool fix);
-
-    // Keyboard hint bar (shown in cyberdeck mode)
     void         drawKeyboardHint(const char* hints);
 }

@@ -2,7 +2,7 @@
 //  HeathenHawk Talon5 — modes/sd_browser.cpp
 //  SD card file browser with touch UI
 // ============================================================
-#include "../pins.h"
+#include "../../pins.h"
 #include "../display/display_driver.h"
 #include "../hawk/hawk_pet.h"
 #include <Arduino.h>

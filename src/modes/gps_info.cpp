@@ -2,7 +2,7 @@
 //  HeathenHawk Talon5 — modes/gps_info.cpp
 //  Live GPS info display
 // ============================================================
-#include "../pins.h"
+#include "../../pins.h"
 #include "../display/display_driver.h"
 #include "../hawk/hawk_pet.h"
 #include <Arduino.h>
@@ -13,7 +13,7 @@
 
 void mode_gps_info() {
     TinyGPSPlus gps;
-    Serial2.begin(9600, SERIAL_8N1, M5BUS_UART_RX, M5BUS_UART_TX);
+    Serial2.begin(115200, SERIAL_8N1, M5BUS_UART_RX, M5BUS_UART_TX);
 
     Display::clear(HH_DARK);
     Display::drawStatusBar(MODE_NAME, false, false, false, 100);

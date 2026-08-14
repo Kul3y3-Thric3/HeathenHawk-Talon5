@@ -1,31 +1,30 @@
 // ============================================================
 //  HeathenHawk Talon5 — modes/wifi_scanner.cpp
-//  WiFi scanner with full touch UI
-//  Dual-band 2.4GHz + 5GHz via C6 + C5 co-processors
+//  WiFi scanner — runs directly on P4 via hosted C6 WiFi driver
+//  No co-processor firmware needed — SDIO WiFi works natively
 // ============================================================
 
-#include "../pins.h"
+#include "../../pins.h"
 #include "../display/display_driver.h"
-#include "../comms/comms_manager.h"
 #include "../hawk/hawk_pet.h"
 #include <Arduino.h>
 #include <M5Unified.h>
-#include <vector>
-#include <string>
+#include <WiFi.h>
 #include <SD.h>
 
 #define MODE_NAME    "WiFi Scanner"
 #define LOG_FILE     "/wifi_scan.csv"
 #define MAX_NETWORKS 200
+#define ROW_H        110
+#define HEADER_H     120
+#define STATUS_H     64
 
 struct WifiNet {
     char     ssid[33];
     char     bssid[18];
     char     auth[16];
-    char     vendor[24];
     int8_t   rssi;
     int      channel;
-    uint8_t  band;       // 0=2.4GHz, 1=5GHz
     uint32_t lastSeenMs;
     uint32_t seenCount;
 };
@@ -35,28 +34,12 @@ static uint16_t  netCount    = 0;
 static int16_t   scrollIdx   = 0;
 static bool      sdReady     = false;
 static bool      scanning    = false;
-static uint32_t  lastScanMs  = 0;
 static bool      needsRedraw = true;
 static int16_t   selectedNet = -1;
 
-// ── Sort by RSSI ──────────────────────────────────────────────────────────────
-void sortNetworks() {
-    for (int i = 0; i < netCount-1; i++) {
-        for (int j = 0; j < netCount-i-1; j++) {
-            if (networks[j].rssi < networks[j+1].rssi) {
-                WifiNet tmp = networks[j];
-                networks[j] = networks[j+1];
-                networks[j+1] = tmp;
-            }
-        }
-    }
-}
-
-// ── Find or add network ───────────────────────────────────────────────────────
 int16_t findOrAddNet(const char* bssid) {
-    for (int i = 0; i < netCount; i++) {
+    for (int i = 0; i < netCount; i++)
         if (strcasecmp(networks[i].bssid, bssid) == 0) return i;
-    }
     if (netCount >= MAX_NETWORKS) return -1;
     int16_t idx = netCount++;
     memset(&networks[idx], 0, sizeof(WifiNet));
@@ -64,118 +47,123 @@ int16_t findOrAddNet(const char* bssid) {
     return idx;
 }
 
-// ── SD logging ────────────────────────────────────────────────────────────────
-void logWifiNet(const WifiNet& n) {
-    if (!sdReady) return;
-    File f = SD.open(LOG_FILE, FILE_APPEND);
-    if (!f) return;
-    f.printf("%s,\"%s\",%s,%s,%d,%d,%s,%lu\n",
-             n.bssid, n.ssid, n.auth, n.vendor,
-             n.rssi, n.channel,
-             n.band == 0 ? "2.4GHz" : "5GHz",
-             millis());
-    f.close();
+const char* authStr(wifi_auth_mode_t auth) {
+    switch (auth) {
+        case WIFI_AUTH_OPEN:         return "OPEN";
+        case WIFI_AUTH_WEP:          return "WEP";
+        case WIFI_AUTH_WPA_PSK:      return "WPA";
+        case WIFI_AUTH_WPA2_PSK:     return "WPA2";
+        case WIFI_AUTH_WPA_WPA2_PSK: return "WPA/2";
+        case WIFI_AUTH_WPA3_PSK:     return "WPA3";
+        default:                     return "UNKN";
+    }
 }
 
-// ── WiFi result callback ──────────────────────────────────────────────────────
-void onWiFiNet(const WiFiResult& r) {
-    int16_t idx = findOrAddNet(r.bssid);
-    if (idx < 0) return;
+void doScan() {
+    // Non-blocking async scan
+    WiFi.mode(WIFI_STA);
+    int n = WiFi.scanNetworks(false, true);  // async=false, show hidden=true
 
-    bool isNew = (networks[idx].seenCount == 0);
-    strlcpy(networks[idx].ssid,   r.ssid,   sizeof(networks[idx].ssid));
-    strlcpy(networks[idx].auth,   r.auth,   sizeof(networks[idx].auth));
-    strlcpy(networks[idx].vendor, r.vendor, sizeof(networks[idx].vendor));
-    networks[idx].rssi       = r.rssi;
-    networks[idx].channel    = r.channel;
-    networks[idx].band       = r.band;
-    networks[idx].lastSeenMs = millis();
-    networks[idx].seenCount++;
+    if (n <= 0) return;
 
-    if (isNew) logWifiNet(networks[idx]);
+    for (int i = 0; i < n; i++) {
+        char bssid[18];
+        uint8_t* raw = WiFi.BSSID(i);
+        snprintf(bssid, sizeof(bssid), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 raw[0],raw[1],raw[2],raw[3],raw[4],raw[5]);
+
+        int16_t idx = findOrAddNet(bssid);
+        if (idx < 0) continue;
+
+        bool isNew = (networks[idx].seenCount == 0);
+        String ssid = WiFi.SSID(i);
+        strlcpy(networks[idx].ssid,  ssid.c_str(), sizeof(networks[idx].ssid));
+        strlcpy(networks[idx].auth,
+                authStr(WiFi.encryptionType(i)),
+                sizeof(networks[idx].auth));
+        networks[idx].rssi       = WiFi.RSSI(i);
+        networks[idx].channel    = WiFi.channel(i);
+        networks[idx].lastSeenMs = millis();
+        networks[idx].seenCount++;
+
+        if (isNew && sdReady) {
+            File f = SD.open(LOG_FILE, FILE_APPEND);
+            if (f) {
+                f.printf("%s,\"%s\",%s,%d,%d,%lu\n",
+                         networks[idx].bssid, networks[idx].ssid,
+                         networks[idx].auth, networks[idx].rssi,
+                         networks[idx].channel, millis());
+                f.close();
+            }
+            HawkPet::feed(FEED_WIFI_SCAN, 1);
+        }
+    }
+
+    WiFi.scanDelete();
     needsRedraw = true;
 }
 
-// ── Row height based on orientation ──────────────────────────────────────────
-int32_t rowHeight() {
-    return Display::getOrientation() == ORI_LANDSCAPE ? 56 : 70;
+static int32_t visibleRows() {
+    return (Display::height() - STATUS_H - HEADER_H) / ROW_H;
 }
 
-int32_t visibleRows() {
-    return (Display::height() - 100) / rowHeight();
+void drawScanButton() {
+    uint32_t col = scanning ? HH_CORAL : HH_GREEN;
+    int32_t bw = 320;
+    int32_t bh = 80;
+    int32_t bx = Display::width() - bw - 20;
+    int32_t by = STATUS_H + 20;
+    Display::fillRoundRect(bx, by, bw, bh, 16, col);
+    Display::setTextColor(HH_WHITE, col);
+    Display::setTextSize(3.0f);
+    Display::setCursor(bx + 30, by + 20);
+    Display::print(scanning ? "  SCANNING..." : "  START SCAN");
 }
 
-// ── Render network list ───────────────────────────────────────────────────────
 void renderWifiList() {
-    Display::clear(HH_DARK);
-    Display::drawStatusBar(MODE_NAME, false, sdReady, Comms::c5Available(), 100);
+    Display::fillRect(0, STATUS_H, Display::width(),
+                      Display::height() - STATUS_H, HH_DARK);
+    Display::drawStatusBar(MODE_NAME, false, sdReady, false, 100);
 
-    // Header bar
-    Display::fillRect(0, 48, Display::width(), 40, HH_DARKCARD);
+    Display::fillRect(0, STATUS_H, Display::width(), HEADER_H, HH_DARKCARD);
     Display::setTextColor(HH_WHITE, HH_DARKCARD);
-    Display::setTextSize(1.3f);
-    Display::setCursor(16, 58);
-    char hdr[48];
-    snprintf(hdr, sizeof(hdr), "%d networks  2.4GHz%s",
-             netCount, Comms::c5Available() ? " + 5GHz" : "");
+    Display::setTextSize(3.5f);
+    Display::setCursor(24, STATUS_H + 26);
+    char hdr[32];
+    snprintf(hdr, sizeof(hdr), "%d networks found", netCount);
     Display::print(hdr);
 
-    // Scan button
-    uint32_t btnCol = scanning ? HH_CORAL : HH_GREEN;
-    Display::fillRoundRect(Display::width()-140, 54, 124, 28, 8, btnCol);
-    Display::setTextColor(HH_WHITE, btnCol);
-    Display::setCursor(Display::width()-128, 62);
-    Display::print(scanning ? "● Scanning" : "▶ Scan");
+    drawScanButton();
 
-    // Network rows
     if (netCount == 0) {
         Display::setTextColor(HH_GRAY, HH_DARK);
-        Display::setTextSize(1.6f);
-        Display::setCursor(40, Display::height()/2 - 20);
-        Display::print("Tap Scan to start");
+        Display::setTextSize(3.5f);
+        Display::setCursor(40, Display::height()/2);
+        Display::print("Tap START SCAN to begin");
+        needsRedraw = false;
         return;
     }
 
-    int32_t y = 96;
-    int32_t rh = rowHeight();
-
+    int32_t y = STATUS_H + HEADER_H;
     for (int16_t i = scrollIdx;
          i < netCount && (i - scrollIdx) < visibleRows(); i++) {
-
         WifiNet& n = networks[i];
-        bool sel = (i == selectedNet);
-        bool fresh = (millis() - n.lastSeenMs < 10000);
+        bool fresh = (millis() - n.lastSeenMs < 30000);
+        bool sel   = (i == selectedNet);
+        uint32_t col = fresh ? HH_TEAL : HH_GRAY;
 
-        // Band color
-        uint32_t bandCol = n.band == 1 ? HH_TEAL : HH_PURPLE;
-        if (!fresh) bandCol = HH_GRAY;
-
-        // Label
-        char label[36];
-        strlcpy(label, strlen(n.ssid) > 0 ? n.ssid : "[Hidden]", sizeof(label));
-
-        // Detail
         char detail[64];
-        snprintf(detail, sizeof(detail), "%s  Ch%d  %s  %s",
-                 n.bssid, n.channel,
-                 n.band == 0 ? "2.4G" : "5GHz",
-                 n.vendor);
+        snprintf(detail, sizeof(detail), "%s  Ch%d  %s  x%lu",
+                 n.bssid, n.channel, n.auth, n.seenCount);
 
-        // Badge
-        char badge[8];
-        strlcpy(badge, n.auth, sizeof(badge));
-
-        Display::drawScanRow(y, rh, label, detail, badge,
-                             n.rssi, sel, bandCol);
-
-        // Touch target for selection
-        y += rh;
+        Display::drawScanRow(y, ROW_H,
+                             strlen(n.ssid) > 0 ? n.ssid : "[Hidden]",
+                             detail, n.auth, n.rssi, sel, col);
+        y += ROW_H;
     }
-
     needsRedraw = false;
 }
 
-// ── Network detail view ───────────────────────────────────────────────────────
 void showNetDetail(int16_t idx) {
     if (idx < 0 || idx >= netCount) return;
     WifiNet& n = networks[idx];
@@ -183,153 +171,139 @@ void showNetDetail(int16_t idx) {
     Display::clear(HH_DARK);
     Display::drawStatusBar(n.ssid[0] ? n.ssid : "[Hidden]",
                            false, sdReady, false, 100);
+    Display::drawCard(20, STATUS_H + 20,
+                      Display::width()-40, 480,
+                      "Network Details", HH_TEAL);
 
-    Display::drawCard(16, 60, Display::width()-32, 320, "Network Details",
-                      n.band == 1 ? HH_TEAL : HH_PURPLE);
-
-    Display::setTextColor(HH_WHITE, HH_DARKCARD);
-    Display::setTextSize(1.4f);
-
-    auto row = [](int32_t y, const char* label, const char* val) {
+    auto row = [](int32_t y, const char* lbl, const char* val) {
         Display::setTextColor(HH_GRAY, HH_DARKCARD);
-        Display::setCursor(36, y);
-        Display::print(label);
+        Display::setTextSize(2.8f);
+        Display::setCursor(40, y);
+        Display::print(lbl);
         Display::setTextColor(HH_WHITE, HH_DARKCARD);
-        Display::setCursor(200, y);
+        Display::setCursor(280, y);
         Display::print(val);
     };
 
     char buf[32];
-    row(100,  "SSID",    n.ssid[0] ? n.ssid : "[Hidden]");
-    row(130,  "BSSID",   n.bssid);
-    row(160,  "Vendor",  n.vendor[0] ? n.vendor : "Unknown");
-    row(190,  "Auth",    n.auth);
+    row(STATUS_H + 80,  "SSID",    n.ssid[0] ? n.ssid : "[Hidden]");
+    row(STATUS_H + 140, "BSSID",   n.bssid);
+    row(STATUS_H + 200, "Auth",    n.auth);
     snprintf(buf, sizeof(buf), "%d", n.channel);
-    row(220,  "Channel", buf);
-    row(250,  "Band",    n.band == 0 ? "2.4GHz" : "5GHz");
+    row(STATUS_H + 260, "Channel", buf);
     snprintf(buf, sizeof(buf), "%d dBm", n.rssi);
-    row(280,  "RSSI",    buf);
-    snprintf(buf, sizeof(buf), "%lu", n.seenCount);
-    row(310,  "Seen",    buf);
+    row(STATUS_H + 320, "RSSI",    buf);
+    snprintf(buf, sizeof(buf), "%lu times", n.seenCount);
+    row(STATUS_H + 380, "Seen",    buf);
 
-    // RSSI bar
-    Display::setTextColor(HH_GRAY, HH_DARK);
-    Display::setTextSize(1.3f);
-    Display::setCursor(36, 360);
-    Display::print("Signal strength");
-    Display::drawRSSIBar(36, 385, Display::width()-72, 20,
-                         n.rssi, n.band == 1 ? HH_TEAL : HH_PURPLE);
-
-    // Back button
-    Display::fillRoundRect(16, Display::height()-80, 160, 52, 12, HH_GRAY);
+    Display::fillRoundRect(20, Display::height()-120,
+                           300, 90, 16, HH_GRAY);
     Display::setTextColor(HH_WHITE, HH_GRAY);
-    Display::setTextSize(1.5f);
-    Display::setCursor(48, Display::height()-60);
-    Display::print("◀ Back");
+    Display::setTextSize(3.2f);
+    Display::setCursor(60, Display::height()-92);
+    Display::print("BACK");
 
-    // Wait for tap
     while (true) {
-        M5.update();
-        auto evt = M5.Touch.getDetail();
-        if (evt.wasPressed()) {
-            // Back button area
-            if (evt.y > Display::height()-90) break;
+        m5::touch_point_t tp[1];
+        if (M5.Lcd.getTouchRaw(tp, 1) > 0) {
+            if (tp[0].y > Display::height()-130) {
+                while (M5.Lcd.getTouchRaw(tp, 1) > 0) delay(10);
+                break;
+            }
         }
-        delay(30);
+        delay(10);
     }
 }
 
-// ── Main mode ─────────────────────────────────────────────────────────────────
 void mode_wifi_scanner() {
     netCount    = 0;
     scrollIdx   = 0;
-    selectedNet = -1;
-    needsRedraw = true;
     scanning    = false;
+    needsRedraw = true;
+    selectedNet = -1;
     memset(networks, 0, sizeof(networks));
 
     sdReady = SD.begin();
-    if (sdReady && !SD.exists(LOG_FILE)) {
-        File f = SD.open(LOG_FILE, FILE_WRITE);
-        if (f) { f.println("BSSID,SSID,Auth,Vendor,RSSI,Channel,Band,Timestamp"); f.close(); }
-    }
-
-    Comms::onWiFiResult(onWiFiNet);
 
     renderWifiList();
 
+    uint32_t lastScanMs = 0;
+
     while (true) {
         M5.update();
-        Comms::poll();
 
-        // Back gesture — swipe from left edge or long press
-        auto evt = M5.Touch.getDetail();
-
-        if (evt.wasPressed()) {
-            int32_t tx = evt.x;
-            int32_t ty = evt.y;
-
-            // Scan button
-            if (ty >= 54 && ty <= 82 && tx >= Display::width()-140) {
-                if (!scanning) {
-                    scanning = true;
-                    lastScanMs = millis();
-                    Comms::startWiFiScan(Comms::c5Available());
-                    needsRedraw = true;
-                } else {
-                    Comms::stopAll();
-                    scanning = false;
-                    needsRedraw = true;
-                }
-
-            // Network rows
-            } else if (ty > 96) {
-                int32_t rh  = rowHeight();
-                int16_t idx = scrollIdx + (ty - 96) / rh;
-                if (idx < netCount) {
-                    selectedNet = idx;
-                    showNetDetail(idx);
-                    selectedNet = -1;
-                    needsRedraw = true;
-                }
-            }
-
-            // Left edge swipe = back
-            if (tx < 30) break;
-        }
-
-        // Scroll via swipe
-        static int32_t lastTouchY = 0;
-        if (evt.isPressed()) {
-            if (lastTouchY > 0) {
-                int32_t dy = lastTouchY - evt.y;
-                if (abs(dy) > 20) {
-                    scrollIdx = constrain(scrollIdx + (dy > 0 ? 1 : -1),
-                                         0, max((int16_t)0, (int16_t)(netCount - visibleRows())));
-                    needsRedraw = true;
-                    lastTouchY = evt.y;
-                }
-            } else {
-                lastTouchY = evt.y;
-            }
-        } else {
-            lastTouchY = 0;
-        }
-
-        // Auto-rescan every 8 seconds
-        if (scanning && millis() - lastScanMs > 8000) {
+        // Auto-scan every 10 seconds when scanning
+        if (scanning && millis() - lastScanMs > 10000) {
             lastScanMs = millis();
-            sortNetworks();
-            Comms::startWiFiScan(Comms::c5Available());
+            Display::setTextColor(HH_AMBER, HH_DARKCARD);
+            Display::setTextSize(2.5f);
+            Display::setCursor(24, STATUS_H + 80);
+            Display::print("Scanning...");
+            doScan();
             needsRedraw = true;
         }
 
-        if (needsRedraw) renderWifiList();
+        m5::touch_point_t tp[1];
+        int num = M5.Lcd.getTouchRaw(tp, 1);
+        static bool wasDown = false;
+        bool isDown = (num > 0);
+        bool tapped = isDown && !wasDown;
+        wasDown = isDown;
 
+        if (tapped) {
+            int32_t tx = tp[0].x;
+            int32_t ty = tp[0].y;
+
+            // Back
+            if (tx < 40) break;
+
+            // Scan button
+            if (ty >= STATUS_H + 10 && ty <= STATUS_H + 110 &&
+                tx >= Display::width() - 360) {
+                scanning = !scanning;
+                if (scanning) {
+                    lastScanMs = 0;  // trigger immediate scan
+                }
+                needsRedraw = true;
+            }
+            // Network rows
+            else if (ty > STATUS_H + HEADER_H) {
+                int16_t idx = scrollIdx +
+                              (ty - STATUS_H - HEADER_H) / ROW_H;
+                if (idx < netCount) {
+                    if (idx == selectedNet) {
+                        showNetDetail(idx);
+                        selectedNet = -1;
+                        needsRedraw = true;
+                    } else {
+                        selectedNet = idx;
+                        needsRedraw = true;
+                    }
+                }
+            }
+
+            while (M5.Lcd.getTouchRaw(tp, 1) > 0) delay(10);
+        }
+
+        // Scroll
+        static int32_t lastTY = 0;
+        if (isDown && tp[0].y > STATUS_H + HEADER_H) {
+            if (lastTY > 0) {
+                int32_t dy = lastTY - tp[0].y;
+                if (abs(dy) > 30) {
+                    scrollIdx = constrain(
+                        scrollIdx + (dy > 0 ? 1 : -1),
+                        0, max(0, netCount - (int)visibleRows()));
+                    needsRedraw = true;
+                    lastTY = tp[0].y;
+                }
+            } else lastTY = tp[0].y;
+        } else lastTY = 0;
+
+        if (needsRedraw) renderWifiList();
         HawkPet::tick();
-        delay(16);
+        delay(10);
     }
 
-    Comms::stopAll();
-    Comms::onWiFiResult(nullptr);
+    WiFi.mode(WIFI_OFF);
 }

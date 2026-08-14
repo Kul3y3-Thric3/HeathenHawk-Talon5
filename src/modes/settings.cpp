@@ -3,7 +3,7 @@
 //  Settings menu with touch UI
 //  Load config from SD card /config.txt
 // ============================================================
-#include "../pins.h"
+#include "../../pins.h"
 #include "../display/display_driver.h"
 #include "../hawk/hawk_pet.h"
 #include <Arduino.h>

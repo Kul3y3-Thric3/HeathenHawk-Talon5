@@ -9,7 +9,7 @@
 // ============================================================
 
 #include "comms_manager.h"
-#include "../pins.h"
+#include "../../pins.h"
 #include "../hawk/hawk_pet.h"
 #include <ArduinoJson.h>
 
