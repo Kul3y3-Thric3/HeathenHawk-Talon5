@@ -13,7 +13,7 @@
 
 void mode_gps_info() {
     TinyGPSPlus gps;
-    Serial2.begin(115200, SERIAL_8N1, M5BUS_UART_RX, M5BUS_UART_TX);
+    Serial2.begin(115200, SERIAL_8N1, 7, 6);
 
     Display::clear(HH_DARK);
     Display::drawStatusBar(MODE_NAME, false, false, false, 100);

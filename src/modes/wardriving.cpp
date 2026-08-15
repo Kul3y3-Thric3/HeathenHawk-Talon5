@@ -255,7 +255,7 @@ void mode_wardriving() {
         }
     }
 
-    Serial2.begin(115200,SERIAL_8N1,M5BUS_UART_RX,M5BUS_UART_TX);
+    Serial2.begin(115200,SERIAL_8N1,7,6);
     renderWardriving();
 
     uint32_t lastScan=0, lastGPS=0;
