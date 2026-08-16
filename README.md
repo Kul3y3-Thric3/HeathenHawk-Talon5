@@ -1,146 +1,150 @@
-# 🦅 HeathenHawk Talon5
+<div align="center">
 
-**M5Stack Tab5 Red Team Toolkit**  
-*by Kul3y3-Thric3 / Heavens Heathens / ProTechTor*
+**HEATHENHAWK TALON5**
+
+M5Stack Tab5 Red Team Toolkit
+by Kul3y3-Thric3 / Heavens Heathens / ProTechTor
+
+</div>
 
 ---
 
-> ⚠️ **Legal Notice:** For authorized security research and educational use only. Never use offensive features without explicit written permission.
+## What is HeathenHawk Talon5?
 
----
-
-## What is Talon5?
-
-HeathenHawk Talon5 is the Tab5 companion to [HeathenHawk](https://github.com/Kul3y3-Thric3/HeathenHawk). Same DNA — built from the ground up for the M5Stack Tab5's 5" touchscreen, dual-chip architecture, and cyberdeck-ready form factor.
-
-It's the first serious red team firmware for the Tab5 — and the only one that runs in both **tablet mode** and **cyberdeck mode** with full keyboard support.
+HeathenHawk Talon5 is a full-featured red team and security research toolkit built for the **M5Stack Tab5** — a 5" touchscreen ESP32-P4 tablet with built-in ESP32-C6 WiFi/BLE coprocessor. Think Flipper Zero — but with a 5-inch touchscreen, dual-band WiFi, and a colorful interactive UI.
 
 ---
 
 ## Hardware
 
-### M5Stack Tab5
-| Component | Details |
-|---|---|
-| Main processor | ESP32-P4 dual-core RISC-V 400MHz |
-| RAM | 32MB PSRAM + 768KB SRAM |
-| Flash | 16MB |
-| Wireless | ESP32-C6-MINI-1U (WiFi 6 2.4GHz + BLE 5.2) |
-| Display | 5" 1280×720 IPS MIPI-DSI capacitive touch |
-| Camera | SC2356 2MP MIPI-CSI |
-| IMU | BMI270 6-axis |
-| Audio | ES8388 DAC + ES7210 ADC, built-in speaker + dual mic |
-| Storage | microSD slot |
-| RTC | RX8130 |
-| Interfaces | USB-C, USB-A, RS485, Grove, M5Bus (30-pin), GPIO_EXT |
+- Main SoC: ESP32-P4 @ 360MHz, 32MB PSRAM
+- Radio: ESP32-C6 (WiFi 6 + BLE 5) via SDIO
+- Display: 5" 1280x720 ST7701 capacitive touch
+- IMU: BMI270 (auto-rotation)
+- Storage: MicroSD
+- Ports: Grove Port A (I2C), M5Bus, USB-C
+- Power: 2000mAh LiPo, USB-C charging
 
-### Optional — ESP32-C5 for dual-band 5GHz
-Connect an ESP32-C5 DevKit to the M5Bus UART header on the back of the Tab5. Talon5 auto-detects the C5 on boot and enables 5GHz WiFi 6 scanning and Sky Spy dual-band mode.
-
-```
-Tab5 M5Bus Pin 17 (UART TX) → ESP32-C5 DevKit RX
-Tab5 M5Bus Pin 18 (UART RX) → ESP32-C5 DevKit TX
-Tab5 M5Bus 3.3V             → ESP32-C5 DevKit 3V3
-Tab5 M5Bus GND              → ESP32-C5 DevKit GND
-```
-
----
-
-## UI Modes
-
-### Tablet Mode (Portrait)
-The default mode. Grid layout with large touch targets. Tilt the Tab5 upright and the BMI270 IMU switches to portrait orientation automatically.
-
-### Cyberdeck Mode (Landscape)
-When the M5Stack keyboard attachment is connected, or when held in landscape orientation, the UI switches to a sidebar list + detail panel layout optimized for keyboard navigation. Arrow keys scroll the list, Enter launches the mode.
+### Tested Grove Modules
+- M5Stack RFID2 Unit (WS1850S, I2C 0x28) — MIFARE Classic + NTAG read/write
+- M5Stack NFC Unit (ST25R3916, I2C 0x50) — Full NFC-A/B/F/V + hardware emulation
+- M5Stack Unit GPS SMA (AT6668) — Via M5Bus UART G7/G6
 
 ---
 
 ## Features
 
-### 📡 WiFi (via ESP32-C6 + optional C5)
-- Dual-band scan 2.4GHz + 5GHz (with C5)
-- Deauth — targeted deauthentication
-- Beacon spam — SSID flooding
-- Evil Portal — captive portal with credential capture
-- Wardriving — GPS-tagged WiFi + Wigle.net upload
+### WiFi
+- WiFi Scanner — Live rolling scan, OUI lookup, signal strength, SD logging
+- Evil Portal — Captive portal with SSID picker, custom SSID keyboard entry, credential capture
+- Deauth — 802.11 deauthentication frames
+- Beacon Spam — Multi-SSID beacon broadcast
+- Wardriving — GPS-tagged network logging to SD
 
-### 📶 BLE (via ESP32-C6)
-- Full passive BLE scanner
-- Apple Continuity decoder
-- Foxhunter — RSSI proximity tracker
-- Flock-You — surveillance camera detection
-- BLE spam — iOS/Android/Samsung/Windows pairing popups
+### Bluetooth
+- BLE Scanner — Non-blocking scan, watchlist detection, RSSI display
+- BLE Spam — Apple Continuity + Google Fast Pair proximity payloads
+- Sky Spy — FAA Remote ID (ASTM F3411) detection from drones
+- Flock-You — OUI-based detection of Flock Safety, Raven, Rekor, Axon LPR cameras
+- Foxhunter — RSSI proximity radar for tracking a target device
 
-### 🛸 Passive Sensing
-- Sky Spy — FAA Remote ID drone detection
-- Flock-You — Flock Safety / Raven / Rekor camera detection
+### RFID (RFID2 unit required)
+- Read MIFARE Classic 1K/4K, MIFARE Ultralight, NTAG2xx
+- Auto key attack with expanded dictionary
+- Write NDEF (URL/Text) to blank NTAG tags
+- Custom URL/Text entry via on-screen keyboard
+- Save/load/clone card data
+- View raw sector/page data
 
-### 📸 Camera
-- Live viewfinder on 5" display
-- Snapshot to SD card
-- QR code decoder
+### NFC (NFC Unit required)
+- Full ISO14443-A/B, FeliCa, ISO15693 detection
+- NDEF read (URL, Text auto-parsed)
+- Write NDEF to blank tags with keyboard entry
+- Copy tag data to blank tags
+- Hardware tag emulation via ST25R3916 EmulationLayerA
+- Save/Load to SD card
 
-### 📍 GPS
-- Hardware GPS via Grove/M5Bus
-- Wardriving with Wigle CSV export
-- Direct Wigle API upload
-
-### 🦅 HawkBird
-Same tamagotchi companion from HeathenHawk — every tool you use feeds your Hawk. Persists across reboots.
-
----
-
-## Building
-
-```bash
-git clone https://github.com/Kul3y3-Thric3/HeathenHawk-Talon5.git
-cd HeathenHawk-Talon5
-pip install platformio
-pio run -e talon5
-```
-
-### Flashing
-Use the M5Stack Flash Download Tool or PlatformIO upload:
-
-```bash
-pio run -e talon5 --target upload
-```
+### Other
+- GPS Info — NMEA parsing, satellite count, coordinate display
+- SD Browser — Browse and view SD card contents
+- HawkBird — Companion pet that reacts to tool usage
+- Settings — Device configuration
 
 ---
 
-## Comparison vs HeathenHawk
+## Installation
 
-| Feature | HeathenHawk (C5) | Talon5 (Tab5) |
-|---|---|---|
-| Display | 1.14" TFT buttons | 5" 1280×720 touch |
-| WiFi | Dual-band C5 native | C6 built-in + C5 optional |
-| BLE | NimBLE native | C6 co-processor |
-| Camera | No | 2MP built-in |
-| Audio | Passive buzzer | Speaker + dual mic |
-| IMU | No | BMI270 6-axis |
-| GPS | External module | External via Grove |
-| Keyboard | No | M5Stack attachment |
-| Form factor | Pocket device | Tablet / Cyberdeck |
-| Battery | External LiPo | Built-in removable |
+### Requirements
+- Arduino IDE 2.x
+- M5Stack board package 3.3.8+
+- Board: M5Stack Tab5
 
----
+### Libraries (install via Library Manager)
+- M5Unified
+- M5GFX
+- TinyGPSPlus
+- ArduinoJson
+- FastLED
+- MFRC522_I2C (by kkloesener)
+- M5Unit-NFC (by M5Stack)
+- M5UnitUnified (by M5Stack)
+- M5Utility (by M5Stack)
 
-## Roadmap
-
-- [ ] C5 co-processor firmware (handles 5GHz commands from P4)
-- [ ] Camera-based QR scanner
-- [ ] Audio alerts and voice mode names
-- [ ] OTA update via WiFi
-- [ ] Web dashboard via hotspot
-- [ ] PCB expansion board for GPS + external antenna
-
----
-
-## Legal
-
-For **authorized security research, penetration testing, and educational use only.**
+### Build and Flash
+1. Clone this repo
+2. Open HeathenHawk_Talon5.ino in Arduino IDE
+3. Select board: M5Stack Tab5
+4. Select correct COM port
+5. Upload
 
 ---
 
-*Built with 🦅 by Kul3y3-Thric3 — Heavens Heathens / Heathen House Ent. / ProTechTor*
+## Hardware Wiring
+
+### Grove Port A — Plug and Play
+Connect RFID2 or NFC unit directly to Grove Port A. Both use I2C and work immediately.
+
+### GPS via M5Bus
+The Unit GPS SMA requires UART. Wire to M5Bus header on the back of the Tab5:
+
+- GPS TX  to  M5Bus Pin 15 (G7)
+- GPS RX  to  M5Bus Pin 16 (G6)
+- 5V      to  M5Bus Pin 28
+- GND     to  M5Bus Pin 1
+
+---
+
+## Legal and Ethical Use
+
+This tool is for authorized security research and educational use only.
+
+- Only use on networks and devices you own or have explicit permission to test
+- Deauth and beacon spam may be illegal in your jurisdiction
+- RFID/NFC cloning of access cards you do not own is illegal
+- The authors are not responsible for misuse
+
+---
+
+## Credits
+
+See CREDITS.md for full acknowledgments.
+
+Key inspirations: ESP32 Marauder, Bruce Firmware, M5Stick-Nemo, Evil-M5Project,
+OUI Spy Unified Blue (@colonelpanichacks), furiousMAC, ASTM F3411.
+
+---
+
+## About
+
+HeathenHawk Talon5 is developed by Eye Luk (Kul3y3-Thric3), recording artist,
+audio engineer, aspiring cybersecurity student, and founder of ProTechTor — a
+cybersecurity education brand built for musicians and creatives.
+
+- Music: heavensheathens.store
+- Security: theprotechtor.com (coming soon)
+- GitHub: github.com/Kul3y3-Thric3
+
+---
+
+Built with fire by Heavens Heathens / ProTechTor
+"Stay curious. Stay dangerous. Stay legal."
