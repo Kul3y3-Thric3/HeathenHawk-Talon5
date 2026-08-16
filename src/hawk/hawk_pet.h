@@ -21,7 +21,9 @@
 #define FEED_GPS            10
 #define FEED_SD_LOG         11
 #define FEED_CAMERA         12
-#define FEED_COUNT          13
+#define FEED_RFID           13
+#define FEED_NFC            14
+#define FEED_COUNT          15
 
 // ── Evolution stages ──────────────────────────────────────────────────────────
 enum HawkStage {

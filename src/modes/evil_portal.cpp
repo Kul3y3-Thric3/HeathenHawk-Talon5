@@ -189,7 +189,7 @@ void renderPortal2() {
         Display::setTextColor(HH_GREEN,HH_DARK);
         Display::setTextSize(2.8f);
         Display::setCursor(20,STATUS_H+180);
-        Display::print("AP: Free WiFi  (Open, no password)");
+        Display::printf("AP: %s  (Open)", portalSSID);
         Display::setCursor(20,STATUS_H+230);
         Display::print("IP: 192.168.4.1");
         Display::setCursor(20,STATUS_H+280);
@@ -243,12 +243,12 @@ void mode_evil_portal() {
     Display::setCursor(40,STATUS_H+20);
     Display::print("Portal SSID:");
     for (int i=0;i<6;i++) {
-        int32_t by=STATUS_H+100+i*110;
-        Display::fillRoundRect(40,by,Display::width()-80,100,16,HH_DARKCARD);
-        Display::drawRoundRect(40,by,Display::width()-80,100,16,HH_PINK);
+        int32_t by=STATUS_H+80+i*90;
+        Display::fillRoundRect(40,by,Display::width()-80,80,16,HH_DARKCARD);
+        Display::drawRoundRect(40,by,Display::width()-80,80,16,HH_PINK);
         Display::setTextColor(HH_WHITE,HH_DARKCARD);
         Display::setTextSize(3.0f);
-        Display::setCursor(60,by+30);
+        Display::setCursor(60,by+22);
         Display::print(ssidOpts[i].name);
     }
     bool ssidChosen=false;
@@ -258,10 +258,70 @@ void mode_evil_portal() {
         if (M5.Lcd.getTouchRaw(tp2,1)>0) {
             while (M5.Lcd.getTouchRaw(tp2,1)>0) delay(10);
             for (int i=0;i<6;i++) {
-                int32_t by=STATUS_H+100+i*110;
-                if (tp2[0].y>=by&&tp2[0].y<=by+100) {
-                    if (i<5) strlcpy(portalSSID,ssidOpts[i].name,sizeof(portalSSID));
-                    ssidChosen=true; break;
+                int32_t by=STATUS_H+80+i*90;
+                if (tp2[0].y>=by&&tp2[0].y<=by+80) {
+                    if (i<5) {
+                        strlcpy(portalSSID,ssidOpts[i].name,sizeof(portalSSID));
+                        ssidChosen=true;
+                    } else {
+                        // Custom SSID — char-by-char entry
+                        String customSSID="HeathenHawk";
+                        const char* charset="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -_!";
+                        int cLen=strlen(charset), ci=0;
+                        bool entering=true;
+                        int32_t bwk=(Display::width()-80)/3;
+                        auto drawKbd=[&](){
+                            Display::clear(HH_DARK);
+                            Display::drawStatusBar("Custom SSID",false,false,false,100);
+                            Display::fillRoundRect(20,STATUS_H+10,Display::width()-40,80,12,HH_DARKCARD);
+                            Display::setTextColor(HH_WHITE,HH_DARKCARD);Display::setTextSize(3.0f);
+                            Display::setCursor(36,STATUS_H+30);Display::print(customSSID.c_str());
+                            Display::setTextColor(HH_AMBER,HH_DARK);Display::setTextSize(6.0f);
+                            char cb[2]={charset[ci],0};
+                            Display::setCursor(Display::width()/2-30,STATUS_H+130);Display::print(cb);
+                            Display::fillRoundRect(20,STATUS_H+280,bwk,90,12,HH_PURPLE);
+                            Display::setTextColor(HH_WHITE,HH_PURPLE);Display::setTextSize(3.0f);
+                            Display::setCursor(30,STATUS_H+310);Display::print("<");
+                            Display::fillRoundRect(30+bwk,STATUS_H+280,bwk,90,12,HH_PURPLE);
+                            Display::setTextColor(HH_WHITE,HH_PURPLE);
+                            Display::setCursor(40+bwk,STATUS_H+310);Display::print(">");
+                            Display::fillRoundRect(40+bwk*2,STATUS_H+280,bwk,90,12,HH_GREEN);
+                            Display::setTextColor(HH_WHITE,HH_GREEN);
+                            Display::setCursor(50+bwk*2,STATUS_H+310);Display::print("ADD");
+                            Display::fillRoundRect(20,STATUS_H+390,bwk,90,12,HH_CORAL);
+                            Display::setTextColor(HH_WHITE,HH_CORAL);
+                            Display::setCursor(30,STATUS_H+420);Display::print("DEL");
+                            Display::fillRoundRect(30+bwk,STATUS_H+390,bwk,90,12,HH_TEAL);
+                            Display::setTextColor(HH_WHITE,HH_TEAL);
+                            Display::setCursor(40+bwk,STATUS_H+420);Display::print("SPC");
+                            Display::fillRoundRect(40+bwk*2,STATUS_H+390,bwk,90,12,HH_AMBER);
+                            Display::setTextColor(HH_WHITE,HH_AMBER);
+                            Display::setCursor(50+bwk*2,STATUS_H+420);Display::print("DONE");
+                        };
+                        drawKbd();
+                        while (entering) {
+                            M5.update();
+                            m5::touch_point_t tpk[1];
+                            if (M5.Lcd.getTouchRaw(tpk,1)>0) {
+                                while (M5.Lcd.getTouchRaw(tpk,1)>0) delay(10);
+                                int32_t tx=tpk[0].x,ty=tpk[0].y;
+                                if (ty>=STATUS_H+280&&ty<=STATUS_H+370) {
+                                    if (tx<20+bwk) ci=(ci-1+cLen)%cLen;
+                                    else if (tx<30+bwk*2) ci=(ci+1)%cLen;
+                                    else if (customSSID.length()<32) customSSID+=charset[ci];
+                                } else if (ty>=STATUS_H+390&&ty<=STATUS_H+480) {
+                                    if (tx<20+bwk) { if (customSSID.length()>0) customSSID.remove(customSSID.length()-1); }
+                                    else if (tx<30+bwk*2) { if (customSSID.length()<32) customSSID+=' '; }
+                                    else entering=false;
+                                }
+                                if (entering) drawKbd();
+                            }
+                            delay(20);
+                        }
+                        strlcpy(portalSSID,customSSID.c_str(),sizeof(portalSSID));
+                        ssidChosen=true;
+                    }
+                    break;
                 }
             }
         }
