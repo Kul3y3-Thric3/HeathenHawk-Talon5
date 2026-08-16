@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include <M5Unified.h>
 #include <WiFi.h>
+#include "../comms/comms_manager.h"
 #include <esp_wifi.h>
 
 #define MODE_NAME "Beacon Spam"
@@ -160,7 +161,7 @@ void injectBeacon(const char* ssid, uint8_t channel) {
     frame[p++] = 0x60;  // 48 Mbps
 
     // Send it — use WIFI_IF_STA for injection
-    esp_wifi_80211_tx(WIFI_IF_STA, frame, p, false);
+    esp_wifi_80211_tx(WIFI_IF_STA, frame, p, false); // C6 hosted driver — effectiveness varies
 }
 
 // ── Mode select ───────────────────────────────────────────────────────────────

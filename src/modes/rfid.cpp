@@ -32,7 +32,7 @@ bool writeULPage(byte page, byte* data4) {
     memcpy(&sendBuf[2], data4, 4);
     byte validBits = 0;
     byte recv[1]; byte recvLen = 1;
-    byte status = rfid.PCD_TransceiveData(sendBuf, 6, recv, &recvLen, &validBits, 0, true);
+    byte status = rfid.PCD_TransceiveData(sendBuf, 6, recv, &recvLen, &validBits, 0, false);
     return (status == MFRC522_I2C::STATUS_OK);
 }
 

